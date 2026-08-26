@@ -1,0 +1,9 @@
+{
+  "name": "setuai-backend",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test:integration": "node tests/integration-test.js",
+    "test:categorizer": "node tests/categorizer-test.js"
+  }
+}
