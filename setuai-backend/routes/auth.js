@@ -57,9 +57,16 @@ router.post('/createuser', [
                 await user.save();
 
                 try {
-                    await sendVerificationEmail(user.email, verificationToken);
+                    const emailSent = await sendVerificationEmail(user.email, verificationToken);
+                    if (!emailSent) {
+                        throw new Error('Email delivery is disabled');
+                    }
                 } catch (emailError) {
                     console.error('⚠️ Resend on signup failed:', emailError.message);
+                    return res.status(503).json({
+                        success: false,
+                        error: 'We could not send the verification email. Please try again shortly.',
+                    });
                 }
 
                 return res.status(200).json({
@@ -96,12 +103,18 @@ router.post('/createuser', [
         });
 
         // Send verification email — isolated so a failure here doesn't
-        // leave the user stranded with no meaningful response
+        // produce a false success response.
         try {
-            await sendVerificationEmail(user.email, verificationToken);
+            const emailSent = await sendVerificationEmail(user.email, verificationToken);
+            if (!emailSent) {
+                throw new Error('Email delivery is disabled');
+            }
         } catch (emailError) {
             console.error('⚠️ Verification email failed to send:', emailError.message);
-            // User is created; front-end can offer a "resend" option
+            return res.status(503).json({
+                success: false,
+                error: 'Your account was created, but we could not send the verification email. Please try registering again shortly to resend it.',
+            });
         }
 
         success = true;
@@ -229,7 +242,10 @@ router.post('/resend-verification', [
 
         // Isolated so a mailer failure doesn't return 500 after token is saved
         try {
-            await sendVerificationEmail(user.email, verificationToken);
+            const emailSent = await sendVerificationEmail(user.email, verificationToken);
+            if (!emailSent) {
+                throw new Error('Email delivery is disabled');
+            }
         } catch (emailError) {
             console.error('⚠️ Resend verification email failed:', emailError.message);
             return res.status(500).json({ success: false, error: 'Failed to send email. Please try again shortly.' });

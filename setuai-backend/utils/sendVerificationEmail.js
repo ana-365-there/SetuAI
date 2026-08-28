@@ -3,8 +3,9 @@ const emailDisabled = process.env.DISABLE_EMAIL === 'true';
 
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 465,
-    secure: true, // use SSL
+    port: 587,
+    secure: false, // upgrade to TLS with STARTTLS on port 587
+    requireTLS: true,
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_APP_PASSWORD,
@@ -27,14 +28,22 @@ if (!emailDisabled) {
 
 const sendVerificationEmail = async (toEmail, token) => {
     if (emailDisabled) {
-        return;
+        console.warn('⚠️ Verification email was not sent because DISABLE_EMAIL is enabled.');
+        return false;
     }
 
-    // Determine backend URL for verification endpoint (local fallback to port 5000)
-    const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+    // BACKEND_URL must identify the backend itself. Using URL.origin also keeps a
+    // pasted verification link from producing a duplicated path in the email.
+    const configuredBackendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+    let backendUrl;
+    try {
+        backendUrl = new URL(configuredBackendUrl).origin;
+    } catch {
+        throw new Error('BACKEND_URL must be a valid absolute URL, for example https://setuai.onrender.com');
+    }
     const verifyUrl = `${backendUrl}/api/auth/verify-email?token=${token}`;
 
-    await transporter.sendMail({
+    const delivery = await transporter.sendMail({
         from: `"SETU" <${process.env.EMAIL_USER}>`,
         to: toEmail,
         subject: 'Verify your SETU account',
@@ -45,6 +54,13 @@ const sendVerificationEmail = async (toEmail, token) => {
             <p>This link expires in 1 hour.</p>
         `,
     });
+
+    if (!delivery.accepted || delivery.accepted.length === 0) {
+        throw new Error(`SMTP did not accept the verification-email recipient: ${delivery.rejected?.join(', ') || 'unknown reason'}`);
+    }
+
+    console.log(`✅ Verification email accepted by SMTP (message ID: ${delivery.messageId})`);
+    return true;
 };
 
 module.exports = sendVerificationEmail;
