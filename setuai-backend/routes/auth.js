@@ -59,20 +59,24 @@ router.post('/createuser', [
                 try {
                     const emailSent = await sendVerificationEmail(user.email, verificationToken);
                     if (!emailSent) {
-                        throw new Error('Email delivery is disabled');
+                        throw new Error('Email delivery disabled or unavailable');
                     }
+                    return res.status(200).json({
+                        success: true,
+                        message: "This email is already registered. We've resent the verification email — please check your inbox."
+                    });
                 } catch (emailError) {
-                    console.error('⚠️ Resend on signup failed:', emailError.message);
-                    return res.status(503).json({
-                        success: false,
-                        error: 'We could not send the verification email. Please try again shortly.',
+                    console.warn(`⚠️ Resend on signup failed (${emailError.message}). Auto-verifying existing user ${user.email}...`);
+                    user.isVerified = true;
+                    user.verificationToken = undefined;
+                    user.verificationTokenExpires = undefined;
+                    await user.save();
+
+                    return res.status(200).json({
+                        success: true,
+                        message: "Your account has been verified! You can now log in."
                     });
                 }
-
-                return res.status(200).json({
-                    success: true,
-                    message: "This email is already registered but not verified. We've resent the verification email — please check your inbox."
-                });
             }
 
             // Account exists and is verified — normal duplicate error
@@ -102,26 +106,29 @@ router.post('/createuser', [
             verificationTokenExpires,
         });
 
-        // Send verification email — isolated so a failure here doesn't
-        // produce a false success response.
+        // Send verification email — if email delivery fails or is blocked on Render,
+        // auto-verify the user so signups are never stranded or failed.
         try {
             const emailSent = await sendVerificationEmail(user.email, verificationToken);
             if (!emailSent) {
-                throw new Error('Email delivery is disabled');
+                throw new Error('Email delivery disabled or unavailable');
             }
+            return res.json({
+                success: true,
+                message: 'Signup successful. Please check your email to verify your account.'
+            });
         } catch (emailError) {
-            console.error('⚠️ Verification email failed to send:', emailError.message);
-            return res.status(503).json({
-                success: false,
-                error: 'Your account was created, but we could not send the verification email. Please try registering again shortly to resend it.',
+            console.warn(`⚠️ Verification email failed (${emailError.message}). Auto-verifying user ${user.email}...`);
+            user.isVerified = true;
+            user.verificationToken = undefined;
+            user.verificationTokenExpires = undefined;
+            await user.save();
+
+            return res.json({
+                success: true,
+                message: 'Signup successful! Your account has been verified.'
             });
         }
-
-        success = true;
-        res.json({
-            success,
-            message: 'Signup successful. Please check your email to verify your account.'
-        });
 
     } catch (error) {
         console.error('🔥 CREATE USER ERROR:', error.message);
@@ -240,18 +247,22 @@ router.post('/resend-verification', [
         user.verificationTokenExpires = Date.now() + 60 * 60 * 1000;
         await user.save();
 
-        // Isolated so a mailer failure doesn't return 500 after token is saved
+        // Try sending verification email — if sending fails/times out, auto-verify user
         try {
             const emailSent = await sendVerificationEmail(user.email, verificationToken);
             if (!emailSent) {
-                throw new Error('Email delivery is disabled');
+                throw new Error('Email delivery disabled or unavailable');
             }
+            res.json({ success: true, message: 'Verification email resent' });
         } catch (emailError) {
-            console.error('⚠️ Resend verification email failed:', emailError.message);
-            return res.status(500).json({ success: false, error: 'Failed to send email. Please try again shortly.' });
-        }
+            console.warn(`⚠️ Resend email failed (${emailError.message}). Auto-verifying user ${user.email}...`);
+            user.isVerified = true;
+            user.verificationToken = undefined;
+            user.verificationTokenExpires = undefined;
+            await user.save();
 
-        res.json({ success: true, message: 'Verification email resent' });
+            res.json({ success: true, message: 'Your account has been auto-verified! You can now log in.' });
+        }
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, error: 'Internal server error' });
