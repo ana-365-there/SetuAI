@@ -18,6 +18,7 @@ app.use('/api', require('./routes/solution'));
 app.use('/api', require('./routes/analytics'));
 app.use('/api', require('./routes/comment'));
 app.use('/api', require('./routes/admin'));
+app.use('/api', require('./routes/translator'));
 
 const startServer = async () => {
   try {
