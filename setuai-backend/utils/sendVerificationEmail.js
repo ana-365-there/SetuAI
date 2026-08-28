@@ -1,4 +1,6 @@
 const nodemailer = require('nodemailer');
+const dns = require('node:dns');
+const net = require('node:net');
 const emailDisabled = process.env.DISABLE_EMAIL === 'true';
 
 const transporter = nodemailer.createTransport({
@@ -9,6 +11,28 @@ const transporter = nodemailer.createTransport({
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_APP_PASSWORD,
+    },
+    // Render has no outbound IPv6 route. Resolve Gmail to IPv4 explicitly, then
+    // let Nodemailer perform STARTTLS using the original smtp.gmail.com hostname.
+    getSocket: (options, callback) => {
+        dns.resolve4(options.host, (dnsError, addresses) => {
+            if (dnsError || !addresses?.length) {
+                return callback(dnsError || new Error('No IPv4 address found for SMTP host'));
+            }
+
+            const socket = net.connect({ host: addresses[0], port: options.port, family: 4 });
+            const onTimeout = () => socket.destroy(new Error('SMTP IPv4 connection timed out'));
+            const onError = (error) => callback(error);
+
+            socket.setTimeout(options.connectionTimeout || 5000, onTimeout);
+            socket.once('error', onError);
+            socket.once('connect', () => {
+                socket.setTimeout(0);
+                socket.removeListener('timeout', onTimeout);
+                socket.removeListener('error', onError);
+                callback(null, { connection: socket });
+            });
+        });
     },
     connectionTimeout: 5000,
     greetingTimeout: 5000,
